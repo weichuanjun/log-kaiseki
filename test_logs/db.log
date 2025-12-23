@@ -1,0 +1,5 @@
+2025-12-23 10:00:00 [INFO] PostgreSQL 14.5 starting up
+2025-12-23 10:00:01 [INFO] listening on IPv4 address "0.0.0.0", port 5432
+2025-12-23 10:00:10 [WARNING] High CPU usage detected on query: SELECT * FROM huge_table WHERE unindexed_col = 'test'
+2025-12-23 10:00:15 [ERROR] FATAL: connection limit exceeded for non-superusers
+2025-12-23 10:00:16 [DETAIL] 100 active connections found. Max connections is 100.

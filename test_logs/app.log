@@ -1,0 +1,11 @@
+2025-12-23 10:00:01 [INFO] Application started successfully.
+2025-12-23 10:00:05 [INFO] Loading configuration from /etc/app/config.json
+2025-12-23 10:00:06 [INFO] Connecting to database...
+2025-12-23 10:00:15 [ERROR] Connection timeout: Unable to reach database server at 192.168.1.50:5432
+2025-12-23 10:00:15 [CRITICAL] Database initialization failed. Shutting down.
+Traceback (most recent call last):
+  File "main.py", line 45, in <module>
+    db.connect()
+  File "/app/lib/db.py", line 120, in connect
+    raise ConnectionError("Timeout connecting to DB")
+ConnectionError: Timeout connecting to DB
