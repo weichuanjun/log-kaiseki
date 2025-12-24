@@ -1,92 +1,93 @@
-# ログ解析エージェント (Log-Kaiseki Agent)
+# Log Kaiseki Agent (ログ解析エージェント)
 
-ChainlitとLangGraphを使用した、インテリジェントなログ分析エージェントです。
-複数のログファイルをアップロードすると、AIがエラーの特定、原因分析、解決策の提案を行い、マネージャー向けの要約レポートも生成します。
+LangGraphとChainlitを使用した、高度なログ解析システムです。
+複数のAIエージェント（Context, Analysis, Critique, Summary）が協力して、アップロードされたログファイルを分析し、エラーの原因と解決策を特定します。
 
 ## 機能
 
-*   **マルチログ分析**: 複数のログファイル（`access.log`, `app.log`, `db.log` など）を一度に分析。
-*   **文脈理解**: システムの基本情報（`prompts.py`で定義）に基づいた専門的な分析。
-*   **3段階のエージェントワークフロー**:
-    1.  **Context Agent**: システム情報の注入
-    2.  **Analysis Agent**: 技術的な詳細分析
-    3.  **Summary Agent**: マネージャー向け要約レポート生成
-*   **マルチLLM対応**: OpenAI (GPT-4o) と Azure OpenAI を設定で切り替え可能。
+- **ログ一括分析**: フォルダごとのログファイルを一括でアップロードし、分析できます。
+- **マルチエージェント協調**: 
+  - **Context Agent**: システム情報の確認
+  - **Analysis Agent**: エラーの詳細分析（ファイル名・行番号の引用付き）
+  - **Critique Agent**: 分析結果のレビューと改善指摘（自己修正ループ）
+  - **Summary Agent**: 最終的な専門家レポートの作成
+- **可視化された思考プロセス**: 各エージェントの処理内容がリアルタイムでUIに表示されます。
+- **マルチLLM対応**: OpenAI (GPT-4o) および Azure OpenAI に対応。拡張も容易です。
 
-## セットアップガイド
+## セットアップ手順
 
-### 1. 仮想環境の作成と有効化
+### 1. 前提条件
+
+- Python 3.10 以上
+- OpenAI API Key または Azure OpenAI 環境
+
+### 2. 仮想環境の作成と有効化
+
+プロジェクトのルートディレクトリで以下のコマンドを実行します。
 
 ```bash
 # 仮想環境の作成
-python3 -m venv venv
+python -m venv venv
 
-# 仮想環境の有効化 (Mac/Linux)
+# 有効化 (Mac/Linux)
 source venv/bin/activate
 
-# 仮想環境の有効化 (Windows)
-# venv\Scripts\activate
+# 有効化 (Windows)
+.\venv\Scripts\activate
 ```
 
-### 2. 依存関係のインストール
+### 3. 依存関係のインストール
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 3. 環境変数の設定
+### 4. 環境変数の設定
 
-`example.env` をコピーして `.env` ファイルを作成し、APIキーを設定してください。
+`example.env` をコピーして `.env` を作成し、必要な情報を入力します。
 
 ```bash
 cp example.env .env
 ```
 
-`.env` の内容を編集します：
+`.env` ファイルの内容:
 
 ```env
-# Chainlitの認証シークレット（必須）
-# 生成コマンド: chainlit create-secret
-CHAINLIT_AUTH_SECRET=your_generated_secret_here
-
-# LLMの選択 (openai, azure, google)
+# LLMの選択 (openai または azure)
 LLM_TYPE=openai
 
 # OpenAIを使用する場合
-OPENAI_API_KEY=sk-your-openai-api-key
+OPENAI_API_KEY=sk-proj-...
 
 # Azure OpenAIを使用する場合
-AZURE_OPENAI_API_KEY=your_azure_key
-AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/
+AZURE_OPENAI_API_KEY=...
+AZURE_OPENAI_ENDPOINT=...
 AZURE_OPENAI_API_VERSION=2024-02-15-preview
 AZURE_OPENAI_DEPLOYMENT_NAME=gpt-4o
 
-# Google Geminiを使用する場合 (拡張用)
-GOOGLE_API_KEY=your_google_api_key
+# Chainlitの認証シークレット (生成コマンド: chainlit create-secret)
+CHAINLIT_AUTH_SECRET=...
 ```
 
-### 4. アプリケーションの起動
+### 5. アプリケーションの起動
 
 ```bash
-chainlit run app.py
+chainlit run app.py -w
 ```
-ブラウザが自動的に開き、`http://localhost:8000` にアクセスできます。
-デフォルトのログイン情報は `admin` / `admin` です。
 
-## 拡張ガイド
+ブラウザが自動的に開き、チャット画面が表示されます。
 
-### 新しいLLMノード（例：Google Gemini）を追加する方法
+## 新しいLLMノードの追加方法（例：Google Gemini）
 
-1.  **ライブラリのインストール**:
-    Googleのモデルを使用するために必要なライブラリ（例: `langchain-google-genai`）をインストールし、`requirements.txt` に追加します。
+新しいLLM（例：Google Gemini）を追加したい場合は、以下の手順でコードを修正してください。
+
+1.  **依存関係の追加**:
+    `requirements.txt` に `langchain-google-genai` を追加してインストールします。
 
 2.  **`graph.py` の修正**:
-    `get_llm()` 関数にGoogleモデルの分岐を追加します。
+    `get_llm` 関数に分岐を追加します。
 
     ```python
-    # graph.py
-
-    # 必要なライブラリをインポート
     from langchain_google_genai import ChatGoogleGenerativeAI
 
     def get_llm():
@@ -98,16 +99,15 @@ chainlit run app.py
                 google_api_key=os.getenv("GOOGLE_API_KEY"),
                 temperature=0
             )
-        elif llm_type == "azure":
-            # ... (既存のコード)
-        else:
-            # ... (既存のコード)
+        # ... 既存のコード ...
     ```
 
 3.  **`.env` の更新**:
     `LLM_TYPE=google` と `GOOGLE_API_KEY` を設定します。
 
-### システム情報のカスタマイズ
+## プロジェクト構成
 
-分析対象のシステムが変わった場合は、`prompts.py` の `SYSTEM_CONTEXT_INFO` 変数を書き換えてください。
-ログの形式や、特有のエラーパターンなどを記述することで、AIの分析精度が向上します。
+- `app.py`: Chainlit UIとアプリケーションのエントリーポイント
+- `graph.py`: LangGraphによるエージェントワークフローの定義
+- `prompts.py`: 各エージェントのプロンプト定義
+- `requirements.txt`: 依存ライブラリ一覧

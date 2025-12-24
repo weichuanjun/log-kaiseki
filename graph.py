@@ -13,6 +13,7 @@ from prompts import (
     SYSTEM_CONTEXT_INFO,
     CONTEXT_AGENT_PROMPT,
     ANALYSIS_AGENT_PROMPT,
+    ANALYSIS_FOLLOWUP_PROMPT,
     CRITIC_AGENT_PROMPT,
     SUMMARY_AGENT_PROMPT
 )
@@ -60,30 +61,57 @@ class LogAnalysisState(MessagesState):
 # 3. ノード (処理ステップ) の定義
 # ==========================================
 
+from langchain_core.runnables import RunnableConfig
+
 def context_node(state: LogAnalysisState):
     """
     ステップ1: システム情報のコンテキストを注入するノード
     """
-    system_info = SystemMessage(content=CONTEXT_AGENT_PROMPT)
-    # revision_countを初期化
-    return {"messages": [system_info], "revision_count": 0}
+    messages = state["messages"]
+    
+    # 既にシステム情報が含まれている場合は重複して追加しない
+    # (ただし、revision_countのリセットは行う)
+    has_system_info = any(
+        isinstance(m, SystemMessage) and "システム概要" in str(m.content) 
+        for m in messages
+    )
+    
+    result = {"revision_count": 0}
+    
+    if not has_system_info:
+        system_info = SystemMessage(content=CONTEXT_AGENT_PROMPT)
+        result["messages"] = [system_info]
+        
+    return result
 
-def analysis_node(state: LogAnalysisState):
+def analysis_node(state: LogAnalysisState, config: RunnableConfig):
     """
     ステップ2: エラー解析を行うノード
     """
     messages = state["messages"]
     
+    # プロンプトの選択ロジック
+    # 直前のメッセージがユーザーからのもの（かつ、履歴に既にAIの応答がある）場合はフォローアップとみなす
+    last_message = messages[-1]
+    has_ai_history = any(isinstance(m, AIMessage) for m in messages)
+    
+    if isinstance(last_message, HumanMessage) and has_ai_history:
+        # ユーザーからのフォローアップ入力
+        prompt_content = ANALYSIS_FOLLOWUP_PROMPT
+    else:
+        # 初回分析、またはCritiqueからのフィードバックループ
+        prompt_content = ANALYSIS_AGENT_PROMPT
+    
     # 解析エージェントへの指示を追加
-    instruction = HumanMessage(content=ANALYSIS_AGENT_PROMPT)
+    instruction = HumanMessage(content=prompt_content)
     
     # LLMを実行 (これまでの履歴 + 今回の指示)
-    response = model.invoke(messages + [instruction])
+    response = model.invoke(messages + [instruction], config=config)
     
     # AIの応答（解析結果）を返す
     return {"messages": [response]}
 
-def critique_node(state: LogAnalysisState):
+def critique_node(state: LogAnalysisState, config: RunnableConfig):
     """
     ステップ2.5: 分析結果を批評するノード（新規追加）
     """
@@ -93,14 +121,14 @@ def critique_node(state: LogAnalysisState):
     instruction = HumanMessage(content=CRITIC_AGENT_PROMPT)
     
     # LLMを実行
-    response = model.invoke(messages + [instruction])
+    response = model.invoke(messages + [instruction], config=config)
     
     # 反復回数をインクリメント
     current_count = state.get("revision_count", 0)
     
     return {"messages": [response], "revision_count": current_count + 1}
 
-def summary_node(state: LogAnalysisState):
+def summary_node(state: LogAnalysisState, config: RunnableConfig):
     """
     ステップ3: 最終レポートを作成するノード
     """
@@ -110,7 +138,7 @@ def summary_node(state: LogAnalysisState):
     instruction = HumanMessage(content=SUMMARY_AGENT_PROMPT)
     
     # LLMを実行 (これまでの履歴 + 今回の指示)
-    response = model.invoke(messages + [instruction])
+    response = model.invoke(messages + [instruction], config=config)
     
     # AIの応答（レポート）を返す
     return {"messages": [response]}
@@ -127,8 +155,9 @@ def should_continue(state: LogAnalysisState) -> Literal["analysis_agent", "summa
     last_message = messages[-1]
     content = last_message.content
     
-    # 反復回数の上限チェック (無限ループ防止、最大2回までレビュー)
-    if state["revision_count"] > 2:
+    # 反復回数の上限チェック (無限ループ防止、最大1回までレビュー)
+    # ユーザー要望: Critique Agentは一度だけ指摘する
+    if state["revision_count"] >= 1:
         return "summary_agent"
     
     # 批評家が承認したかどうか
