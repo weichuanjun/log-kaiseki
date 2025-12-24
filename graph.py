@@ -1,5 +1,6 @@
 import os
 from typing import Annotated, Literal, TypedDict
+import operator
 
 from langchain_core.messages import HumanMessage, SystemMessage, BaseMessage, AIMessage
 from langchain_openai import ChatOpenAI, AzureChatOpenAI
@@ -12,6 +13,7 @@ from prompts import (
     SYSTEM_CONTEXT_INFO,
     CONTEXT_AGENT_PROMPT,
     ANALYSIS_AGENT_PROMPT,
+    CRITIC_AGENT_PROMPT,
     SUMMARY_AGENT_PROMPT
 )
 
@@ -51,8 +53,8 @@ model = get_llm()
 # 2. State (状態) の定義
 # ==========================================
 class LogAnalysisState(MessagesState):
-    # メッセージ履歴以外に、各ステップの完了状態などを持ちたい場合はここに追加
-    pass
+    # レビューの反復回数を追跡
+    revision_count: int
 
 # ==========================================
 # 3. ノード (処理ステップ) の定義
@@ -62,20 +64,9 @@ def context_node(state: LogAnalysisState):
     """
     ステップ1: システム情報のコンテキストを注入するノード
     """
-    messages = state["messages"]
-    
-    # システム情報をSystemMessageとして先頭に追加（または更新）
-    # 既にSystemMessageがある場合は、それを維持しつつ、システム固有情報を追加する形にする
-    # ここではシンプルに、CONTEXT_AGENT_PROMPT を含む SystemMessage を生成します。
-    
     system_info = SystemMessage(content=CONTEXT_AGENT_PROMPT)
-    
-    # 履歴の先頭にシステムメッセージがない、または内容が異なれば追加
-    # 注: LangGraphのstate reducerがappendなので、単純に返すと追加される。
-    # 履歴の最初に挿入したいが、MessagesStateは追記型。
-    # ここでは「コンテキストエージェントからの情報提供」としてメッセージを追加します。
-    
-    return {"messages": [system_info]}
+    # revision_countを初期化
+    return {"messages": [system_info], "revision_count": 0}
 
 def analysis_node(state: LogAnalysisState):
     """
@@ -91,6 +82,23 @@ def analysis_node(state: LogAnalysisState):
     
     # AIの応答（解析結果）を返す
     return {"messages": [response]}
+
+def critique_node(state: LogAnalysisState):
+    """
+    ステップ2.5: 分析結果を批評するノード（新規追加）
+    """
+    messages = state["messages"]
+    
+    # 批評エージェントへの指示
+    instruction = HumanMessage(content=CRITIC_AGENT_PROMPT)
+    
+    # LLMを実行
+    response = model.invoke(messages + [instruction])
+    
+    # 反復回数をインクリメント
+    current_count = state.get("revision_count", 0)
+    
+    return {"messages": [response], "revision_count": current_count + 1}
 
 def summary_node(state: LogAnalysisState):
     """
@@ -108,7 +116,31 @@ def summary_node(state: LogAnalysisState):
     return {"messages": [response]}
 
 # ==========================================
-# 4. グラフ (ワークフロー) の構築
+# 4. 条件付きエッジのロジック
+# ==========================================
+
+def should_continue(state: LogAnalysisState) -> Literal["analysis_agent", "summary_agent"]:
+    """
+    Critiqueの結果を見て、修正が必要か（analysisに戻るか）、完了か（summaryに進むか）を判断する
+    """
+    messages = state["messages"]
+    last_message = messages[-1]
+    content = last_message.content
+    
+    # 反復回数の上限チェック (無限ループ防止、最大2回までレビュー)
+    if state["revision_count"] > 2:
+        return "summary_agent"
+    
+    # 批評家が承認したかどうか
+    if "APPROVE" in content:
+        return "summary_agent"
+    else:
+        # REJECTの場合は再分析へ
+        # 批評家のコメントが履歴に残っている状態でAnalysisに戻るので、LLMはそれを考慮して修正できる
+        return "analysis_agent"
+
+# ==========================================
+# 5. グラフ (ワークフロー) の構築
 # ==========================================
 
 # グラフのビルダーを初期化
@@ -117,13 +149,21 @@ workflow = StateGraph(LogAnalysisState)
 # ノードを追加
 workflow.add_node("context_agent", context_node)
 workflow.add_node("analysis_agent", analysis_node)
+workflow.add_node("critique_node", critique_node)
 workflow.add_node("summary_agent", summary_node)
 
-# エッジを定義 (リニアな流れ)
-# START -> context -> analysis -> summary -> END
+# エッジを定義
+# START -> context -> analysis -> critique
 workflow.add_edge(START, "context_agent")
 workflow.add_edge("context_agent", "analysis_agent")
-workflow.add_edge("analysis_agent", "summary_agent")
+workflow.add_edge("analysis_agent", "critique_node")
+
+# 条件付きエッジ: critique -> (check) -> analysis OR summary
+workflow.add_conditional_edges(
+    "critique_node",
+    should_continue,
+)
+
 workflow.add_edge("summary_agent", END)
 
 # メモリ（チェックポイント）の設定

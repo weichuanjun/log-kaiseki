@@ -45,8 +45,14 @@ async def on_chat_start():
         file_names.append(file.name)
         try:
             with open(file.path, "r", encoding="utf-8") as f:
-                content = f.read()
-                log_contents += f"\n\n=== Log File: {file.name} ===\n{content}\n==========================\n"
+                # 行番号を付与して読み込む
+                lines = f.readlines()
+                content_with_lines = ""
+                for i, line in enumerate(lines):
+                    # 1-based index for user friendliness
+                    content_with_lines += f"{i+1:04d}: {line}"
+                
+                log_contents += f"\n\n=== ログファイル: {file.name} ===\n{content_with_lines}\n==========================\n"
         except UnicodeDecodeError:
              log_contents += f"\n\n=== ログファイル: {file.name} ===\n(エンコードエラー: UTF-8テキストとして読み込めませんでした)\n==========================\n"
         except Exception as e:
